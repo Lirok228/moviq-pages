@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Moviq — проверка запуска</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground: #f1f3ef; --surface: #fbfbf9; --ink: #191c19; --ink-soft: #5a615b;
+    --ink-faint: #868d87; --rule: #d5d9d1; --accent: #9c5a0b;
+    --ok: #2c6349; --ok-wash: #dfebe3; --bad: #9e3323; --bad-wash: #f3dfda;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #131614; --surface: #1c201d; --ink: #e7eae5; --ink-soft: #9ba29b;
+      --ink-faint: #757c76; --rule: #313732; --accent: #dfa155;
+      --ok: #6baa85; --ok-wash: #1e2e25; --bad: #d9806e; --bad-wash: #33211d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 40px; background: var(--ground); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 2px; letter-spacing: -0.02em; }
+  .sub { color: var(--ink-soft); font-size: 0.88rem; margin: 0 0 20px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--rule);
+    padding: 14px; margin-bottom: 10px; border-radius: 3px;
+  }
+  .label {
+    font: 600 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+  pre {
+    margin: 0; white-space: pre-wrap; word-break: break-all;
+    font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink);
+  }
+  .status { font-weight: 600; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+  button {
+    -webkit-appearance: none; appearance: none; width: 100%;
+    padding: 13px 16px; font: 600 15px/1 inherit; color: #fff;
+    background: var(--accent); border: none; border-radius: 3px; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .hint {
+    font-size: 0.82rem; color: var(--ink-soft); margin-top: 10px;
+  }
+  code {
+    font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--ground); padding: 1px 4px; border-radius: 2px;
+  }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; }
+  dl.kv dt { color: var(--ink-faint); font-size: 0.85rem; }
+  dl.kv dd { margin: 0; font-size: 0.85rem; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<h1>Проверка запуска мини-приложения</h1>
+<p class="sub">Страница читает стартовые параметры и показывает их как есть. Подпись проверяется у вас на компьютере — токен бота сюда не попадает.</p>
+
+<div class="card">
+  <div class="label">Статус</div>
+  <pre id="status" class="status">читаю…</pre>
+</div>
+
+<div class="card">
+  <div class="label">Где нашлись параметры</div>
+  <pre id="source">—</pre>
+</div>
+
+<div class="card">
+  <div class="label">Сырая строка, без обработки</div>
+  <pre id="raw">—</pre>
+</div>
+
+<div class="card">
+  <div class="label">Что видно в строке</div>
+  <dl class="kv" id="facts"></dl>
+</div>
+
+<button id="copy" disabled>Скопировать строку</button>
+<p class="hint">Скопируйте и выполните у себя в терминале:<br>
+<code>python3 selftest.py --launch "вставить"</code></p>
+
+<script>
+(function () {
+  var statusEl = document.getElementById("status");
+  var sourceEl = document.getElementById("source");
+  var rawEl = document.getElementById("raw");
+  var factsEl = document.getElementById("facts");
+  var copyBtn = document.getElementById("copy");
+
+  // Обёртка стартовых параметров документацией не зафиксирована,
+  // поэтому проверяем три места по очереди.
+  function find() {
+    var frag = window.location.hash.replace(/^#/, "");
+    if (frag) {
+      try {
+        var inner = new URLSearchParams(frag).get("WebAppData");
+        if (inner) return { source: "фрагмент, ключ WebAppData", raw: inner };
+      } catch (e) { /* фрагмент не разбирается как query — идём дальше */ }
+      if (frag.indexOf("hash=") !== -1) return { source: "фрагмент целиком", raw: frag };
+    }
+    var query = window.location.search.replace(/^\?/, "");
+    if (query.indexOf("hash=") !== -1) return { source: "query-строка", raw: query };
+    return { source: "не найдены", raw: "" };
+  }
+
+  function addFact(term, value) {
+    var dt = document.createElement("dt");
+    dt.textContent = term;
+    var dd = document.createElement("dd");
+    dd.textContent = value;
+    factsEl.appendChild(dt);
+    factsEl.appendChild(dd);
+  }
+
+  var current = "";
+
+  function render() {
+    var found = find();
+    current = found.raw;
+    factsEl.textContent = "";
+    sourceEl.textContent = found.source;
+    rawEl.textContent = found.raw || "—";
+
+    if (!found.raw) {
+      statusEl.textContent = "Стартовые параметры не найдены";
+      statusEl.className = "status bad";
+      addFact("вероятная причина", "страница открыта в браузере, а не внутри MAX");
+      copyBtn.disabled = true;
+      return;
+    }
+
+    statusEl.textContent = "Параметры получены";
+    statusEl.className = "status ok";
+
+    // Главный открытый вопрос: как MAX кодирует значения. От этого зависит,
+    // каким декодером собирать строку для подписи на сервере.
+    var keys = found.raw.split("&")
+      .map(function (p) { return p.split("=")[0]; })
+      .filter(Boolean);
+
+    addFact("длина строки", found.raw.length + " символов");
+    addFact("ключи", keys.join(", "));
+    addFact("незакодированный '+'", found.raw.indexOf("+") !== -1 ? "ЕСТЬ" : "нет");
+    addFact("пробелы как %20", found.raw.indexOf("%20") !== -1 ? "есть" : "нет");
+    addFact("есть hash", found.raw.indexOf("hash=") !== -1 ? "да" : "НЕТ");
+
+    copyBtn.disabled = false;
+  }
+
+  render();
+
+  // Смена фрагмента страницу не перезагружает. Без этого при повторном
+  // открытии мини-приложения в том же webview показались бы прошлые данные.
+  window.addEventListener("hashchange", render);
+
+  copyBtn.addEventListener("click", function () {
+    function done(ok) {
+      copyBtn.textContent = ok ? "Скопировано" : "Не вышло — выделите вручную";
+      setTimeout(function () { copyBtn.textContent = "Скопировать строку"; }, 2000);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(current).then(function () { done(true); },
+                                                    function () { done(false); });
+    } else {
+      // Старые webview: подменяем выделение на скрытое поле.
+      var ta = document.createElement("textarea");
+      ta.value = current;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      done(ok);
+    }
+  });
+})();
+</script>
+</body>
+</html>
